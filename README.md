@@ -1,2 +1,2 @@
-# Finance-projects
-This is a repository for all my finance projects. It contians projects made in python and R. 
+# TVP VAR analysis on Indian sectoral indices
+This project focuses on using
