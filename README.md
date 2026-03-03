@@ -198,15 +198,3 @@ source("figures.R")
 - Kilian, L. (2009). Not all oil price shocks are alike: Disentangling demand and supply shocks in the crude oil market. *American Economic Review*, 99(3), 1053–1069.
 
 ---
-
-## 👤 Author
-
-**[Your Name]**
-Department of [Your Department]
-[Your Institution]
-
----
-
-## 📄 License
-
-This repository is intended for academic and research purposes. Please cite appropriately if you use any part of this code or methodology.
