@@ -1,4 +1,3 @@
-# TVP VAR analysis on Indian sectoral indices
 # TVP-VAR Connectedness Analysis of Indian Sectoral Indices
 
 > Examining return and volatility spillovers across NSE sector indices using Time-Varying Parameter VAR and the Diebold-Yilmaz connectedness framework — with oil market structural shocks as key driving variables.
