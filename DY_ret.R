@@ -1,0 +1,307 @@
+# install.packages(c("rugarch","quantmod","dplyr","dynlm","fGarch","data.table","readr","psych"))
+# 
+# rm(list=setdiff(ls(),"dfjdkfj"))
+# cat("/014")
+# 
+# library(rugarch)
+# library(quantmod)
+# library(dplyr)
+# library(dynlm)
+# library(fGarch)
+# library(data.table)
+# library(readr)
+# library(vars)
+# library(psych)
+source("functions.R") #function for spillover analysis
+source("function_tvpvar.R")
+write.csv(x = Data_x,file = "Data_x.csv",row.names = F)
+##########################################################################
+# DY return spillovers
+data_return = read.csv("Data_x.csv",header=T)
+
+DATE = as.Date(as.character(data_return[,1]))
+#DATE = (data_return[,1])
+Y = data_return[,-1]
+k = ncol(Y)
+n = nrow(Y)
+NAMES = colnames(Y)
+
+# lag order selection
+VARselect(data_return[,NAMES], lag.max = 5, type="const")
+### STATIC CONNECTEDNESS APPROACH
+nlag = 1 # VAR(1)
+nfore = 10 # 10-step ahead forecast
+var_full = VAR(Y, p=nlag)
+CV_full = GFEVD(var_full$Phi, var_full$Sigma, n.ahead=nfore)$GFEVD
+rownames(CV_full)=colnames(CV_full)=NAMES
+print(DCA(CV_full)$TABLE)
+table_static=DCA(CV_full)$TABLE
+write.csv(DCA(CV_full)$TABLE,"Static_Connectedness_Return.csv")
+
+### DYNAMIC CONNECTEDNESS APPROACH
+t = nrow(Y)
+space = 200 + nlag # 200 days rolling window estimation
+
+t0 = t-space
+gfevd = ct = npso = array(NA, c(k, k, t0))
+total = matrix(NA, ncol=1, nrow=t0)
+net = from = to = matrix(NA, ncol=k, nrow=t0)
+colnames(gfevd)=rownames(gfevd)=colnames(ct)=rownames(ct)=NAMES
+for (i in 1:t0) {
+  var = VAR(Y[i:(space+i-1),], p=nlag)
+  gfevd[,,i] = GFEVD(var$Phi, var$Sigma, n.ahead=nfore)$GFEVD
+  dca = DCA(gfevd[,,i])
+  ct[,,i] = dca$CT
+  to[i,] = dca$TO
+  from[i,] = dca$FROM
+  net[i,] = dca$NET
+  npso[,,i] = dca$NPSO
+  total[i,] = dca$TCI
+  if (i%%100==0) print(paste0(round(100*i/t0,2),"%"))
+}
+table_dynamic=DCA(gfevd)$TABLE
+print(DCA(gfevd)$TABLE)
+write.csv(DCA(gfevd)$TABLE,"Dynamic_Connectedness_Return.csv")
+
+
+### DYNAMIC TOTAL CONNECTEDNESS
+date = DATE[-c(1:space)]
+
+par(mfcol=c(1,1), oma=c(0.5,0.5,0,0), mar=c(1.5,1,1.5,1)+0.35, mgp=c(0.5,0.5,0))
+plot(date, total, type="l",xaxs="i",col="blue4", las=1, 
+     main="Dynamic Total Return Connectedness",ylab="",ylim=c(floor(min(total)),ceiling(max(total))),
+     yaxs="i",xlab="",tck=-0.02)
+grid(NA,NULL)
+polygon(c(date,rev(date)),c(c(rep(0,t0)),rev(total)),col="blue4", border="blue4")
+box()
+total_ret_var = total/total[1]*100
+
+### TOTAL DIRECTIONAL CONNECTEDNESS TO OTHERS
+split = 2
+par(mfcol=c(ceiling(k/split),split), oma=c(0.5,0.5,0,0), mar=c(1.5,1,1.5,1)+0.5, mgp=c(0.5,0.5,0))
+for (i in 1:k){
+  plot(date,to[,i], xlab="",ylab="",type="l",xaxs="i",col="blue4", las=1, main=paste(colnames(Y)[i],"TO all others"),ylim=c(floor(min(to)),ceiling(max(to))),tck=-0.02,yaxs="i")
+  grid(NA,NULL)
+  polygon(c(date,rev(date)),c(c(rep(0,t0)),rev(to[,i])),col="blue4", border="blue4")
+  box()
+}
+
+### TOTAL DIRECTIONAL CONNECTEDNESS FROM OTHERS
+par(mfcol=c(ceiling(k/split),split), oma=c(0.5,0.5,0,0), mar=c(1.5,1,1.5,1)+0.5, mgp=c(0.5,0.5,0))
+for (i in 1:k){
+  plot(date,from[,i], xlab="",ylab="",type="l",xaxs="i",col="blue4", las=1, main=paste(colnames(Y)[i],"FROM all others"),ylim=c(floor(min(from)),ceiling(max(from))),tck=-0.02,yaxs="i")
+  grid(NA,NULL)
+  polygon(c(date,rev(date)),c(c(rep(0,t0)),rev(from[,i])),col="blue4", border="blue4")
+  box()
+}
+
+### NET TOTAL DIRECTIONAL CONNECTEDNESS
+par(mfcol=c(ceiling(k/split),split), oma=c(0.5,0.5,0,0), mar=c(1.5,1,1.5,1)+0.5, mgp=c(0.5,0.5,0))
+for (i in 1:k){
+  plot(date,net[,i], xlab="",ylab="",type="l",xaxs="i",col="blue4", las=1, main=paste("NET",colnames(Y)[i]),ylim=c(floor(min(net)),ceiling(max(net))),tck=-0.02,yaxs="i")
+  grid(NA,NULL)
+  polygon(c(date,rev(date)),c(c(rep(0,t0)),rev(net[,i])),col="blue4", border="blue4")
+  box()
+}
+
+### NET PAIRWISE DIRECTIONAL CONNECTEDNESS for variable 1
+i=1
+par(mfcol=c(6,2), oma=c(0.5,0.5,0,0), mar=c(1.5,1,1.5,1), mgp=c(0.5,0.5,0))
+for (j in 4:k) {
+  if (i!=j) {
+    # Remove NA rows
+    valid_idx <- which(!is.na(date) & !is.na(total))
+    date <- date[valid_idx]
+    total <- total[valid_idx]
+    
+    plot(date,npso[j,i,], xlab="",ylab="",type="l",xaxs="i",
+         col="blue4", las=1, main=paste0(NAMES[i],"-",NAMES[j]),
+         tck=-0.02,yaxs="i", ylim=c(floor(min(npso)),ceiling(max(npso))))
+    grid(NA,NULL)
+    polygon(c(date,rev(date)),c(c(rep(0,t0)),rev(npso[j,i,])),col="blue4", border="blue4")
+    box()
+  }
+}
+
+### NET PAIRWISE DIRECTIONAL CONNECTEDNESS for variable 2
+i=2
+par(mfcol=c(6,2), oma=c(0.5,0.5,0,0), mar=c(1.5,1,1.5,1), mgp=c(0.5,0.5,0))
+for (j in 4:k) {
+  if (i!=j) {
+    # Remove NA rows
+    valid_idx <- which(!is.na(date) & !is.na(total))
+    date <- date[valid_idx]
+    total <- total[valid_idx]
+    
+    plot(date,npso[j,i,], xlab="",ylab="",type="l",
+         xaxs="i",col="blue4", las=1, main=paste0(NAMES[i],"-",NAMES[j]),
+         tck=-0.02,yaxs="i",ylim=c(floor(min(npso)),ceiling(max(npso))))
+    grid(NA,NULL)
+    polygon(c(date,rev(date)),c(c(rep(0,t0)),rev(npso[j,i,])),col="blue4", border="blue4")
+    box()
+  }
+}
+
+### NET PAIRWISE DIRECTIONAL CONNECTEDNESS for variable 3
+i=3
+par(mfcol=c(6,2), oma=c(0.5,0.5,0,0), mar=c(1.5,1,1.5,1), mgp=c(0.5,0.5,0))
+for (j in 4:k) {
+  if (i!=j) {
+    # Remove NA rows
+    valid_idx <- which(!is.na(date) & !is.na(total))
+    date <- date[valid_idx]
+    total <- total[valid_idx]
+    
+    plot(date,npso[j,i,], xlab="",ylab="",type="l",
+         xaxs="i",col="blue4", las=1, main=paste0(NAMES[i],"-",NAMES[j]),
+         tck=-0.02,yaxs="i",ylim=c(floor(min(npso)),ceiling(max(npso))))
+    grid(NA,NULL)
+    polygon(c(date,rev(date)),c(c(rep(0,t0)),rev(npso[j,i,])),col="blue4", border="blue4")
+    box()
+  }
+}
+
+############## Robustness   ##########################
+
+source("function_tvpvar.R")
+### TVP-VAR
+nlag = 1 # VAR(1)
+nfore = 10 # 10-step ahead forecast
+prior = MinnesotaPrior(0.1, k, nlag)
+tvpvar = TVPVAR(Y, l=c(0.99, 0.99), nlag, prior)
+B_t = tvpvar$beta_t
+Q_t = tvpvar$Q_t
+
+### DYNAMIC CONNECTEDNESS APPROACH
+t = dim(Q_t)[3]
+to = matrix(NA, ncol=k, nrow=t)
+from = matrix(NA, ncol=k, nrow=t)
+net = matrix(NA, ncol=k, nrow=t)
+gfevd = npso = array(NA, c(k, k, t))
+total = matrix(NA, ncol=1, nrow=t)
+colnames(gfevd)=rownames(gfevd)=NAMES
+for (i in 1:t){
+  gfevd[,,i] = GFEVD(B_t[,,i], Q_t[,,i], n.ahead=nfore)$GFEVD
+  dca = DCA(gfevd[,,i])
+  to[i,] = dca$TO
+  from[i,] = dca$FROM
+  net[i,] = dca$NET
+  npso[,,i] = dca$NPSO
+  total[i,] = dca$TCI
+  if (i%%100==0) print(paste0(round(100*i/t,2),"%"))
+}
+
+if ((length(DATE)-t)>0) {
+  date = DATE[-c(length(DATE)-t)]
+} else {
+  date = DATE
+}
+
+### DYNAMIC TOTAL CONNECTEDNESS
+par(mfrow = c(1,1), oma=c(0.5,0.5,0,0), mar=c(1.5,1,1.5,1)+0.5, mgp=c(0.5,0.5,0))
+plot(date,total, type="l",xaxs="i",col="blue4", las=1, 
+     main="Dynamic Total Return Connectedness (TVP-VAR)",ylab="",
+     ylim=c(floor(min(total)),ceiling(max(total))),yaxs="i",xlab="",tck=0.01)
+grid(NA,NULL,lty=1)
+polygon(c(date,rev(date)),c(c(rep(0,nrow(total))),rev(total)),col="blue4", border="blue4")
+box()
+### AVERAGE DYNAMIC Return CONNECTEDNESS TABLE
+print(DCA(gfevd)$TABLE)
+dynamic_table = DCA(gfevd)$TABLE
+write.csv(DCA(gfevd)$TABLE,"Dynamic_Connectedness_Return_TVPVAR.csv")
+
+
+total_ret_tvpvar = total[c(202:5091)]
+total_ret_tvpvar = total_ret_tvpvar/total_ret_tvpvar[1]*100
+total_ret_var <- xts(total_ret_var, as.Date(data_return$Date[c(202:5091)], format='%Y-%m-%d'))
+total_ret_tvpvar <- xts(total_ret_tvpvar, as.Date(data_return$Date[c(202:5091)], format='%Y-%m-%d'))
+compare= cbind(total_ret_var,total_ret_tvpvar)
+
+plot(compare,main = 'Dynamic Total Return Spillovers using VAR and TVP-VAR',
+     yaxis.right = FALSE,col=c("orange","red"))
+addLegend(legend.loc = 'topleft', legend.names = c("VAR","TVP-VAR"),lty=c(1, 1, 1), lwd=c(2, 2, 1),
+          col=c("orange","red"))
+
+
+### TOTAL DIRECTIONAL CONNECTEDNESS TO OTHERS
+par(mfrow = c(ceiling(k/2),2), oma=c(0.5,0.5,0,0), mar=c(1.5,1,1.5,1)+0.5, mgp=c(0.5,0.5,0))
+for (i in 1:k){
+  plot(date,to[,i], xlab="",ylab="",type="l",xaxs="i",col="blue4", las=1, main=paste(colnames(Y)[i],"TO all others"),ylim=c(floor(min(to)),ceiling(max(to))),tck=0.01,yaxs="i")
+  grid(NA,NULL,lty=1)
+  polygon(c(date,rev(date)),c(c(rep(0,nrow(to))),rev(to[,i])),col="blue4", border="blue4")
+  box()
+}
+
+### TOTAL DIRECTIONAL CONNECTEDNESS FROM OTHERS
+par(mfrow = c(ceiling(k/2),2), oma=c(0.5,0.5,0,0), mar=c(1.5,1,1.5,1)+0.5, mgp=c(0.5,0.5,0))
+for (i in 1:k){
+  plot(date,from[,i], xlab="",ylab="",type="l",xaxs="i",col="blue4", las=1, main=paste(colnames(Y)[i],"FROM all others"),ylim=c(floor(min(from)),ceiling(max(from))),tck=0.01,yaxs="i")
+  grid(NA,NULL,lty=1)
+  polygon(c(date,rev(date)),c(c(rep(0,nrow(from))),rev(from[,i])),col="blue4", border="blue4")
+  box()
+}
+
+### NET TOTAL DIRECTIONAL CONNECTEDNESS
+par(mfrow = c(ceiling(k/2),2),oma=c(0.5,0.5,0,0), mar=c(1.5,1,1.5,1)+0.5, mgp=c(0.5,0.5,0))
+for (i in 1:k){
+  plot(date,net[,i], xlab="",ylab="",type="l",xaxs="i",col="blue4", las=1, main=paste("NET",colnames(Y)[i]),ylim=c(floor(min(net)),ceiling(max(net))),tck=0.01,yaxs="i")
+  grid(NA,NULL,lty=1)
+  polygon(c(date,rev(date)),c(c(rep(0,nrow(net))),rev(net[,i])),col="blue4", border="blue4")
+  box()
+}
+
+### NET PAIRWISE DIRECTIONAL CONNECTEDNESS for demandshock
+
+i=1
+par(mfcol=c(6,2), 
+    oma=c(0.5,0.5,0,0), mar=c(1.5,1,1.5,1), mgp=c(0.5,0.5,0))
+for (j in 4:k) {
+  if (i!=j) {
+    # Remove NA rows
+    valid_idx <- which(!is.na(date) & !is.na(total))
+    date <- date[valid_idx]
+    total <- total[valid_idx]
+    
+    plot(date,npso[j,i,], xlab="",ylab="",type="l",xaxs="i",col="blue4", las=1, main=paste0(NAMES[i],"-",NAMES[j]),tck=-0.02,yaxs="i",ylim=c(floor(min(npso)),ceiling(max(npso))))
+    grid(NA,NULL)
+    polygon(c(date,rev(date)),c(c(rep(0,t)),rev(npso[j,i,])),col="blue4", border="blue4")
+    box()
+  }
+}
+
+
+### NET PAIRWISE DIRECTIONAL CONNECTEDNESS for supplyshock
+i=2
+par(mfcol=c(6,2), 
+    oma=c(0.5,0.5,0,0), mar=c(1.5,1,1.5,1), mgp=c(0.5,0.5,0))
+for (j in 4:k) {
+  if (i!=j) {
+    # Remove NA rows
+    valid_idx <- which(!is.na(date) & !is.na(total))
+    date <- date[valid_idx]
+    total <- total[valid_idx]
+    
+    plot(date,npso[j,i,], xlab="",ylab="",type="l",xaxs="i",col="blue4", las=1, main=paste0(NAMES[i],"-",NAMES[j]),tck=-0.02,yaxs="i",ylim=c(floor(min(npso)),ceiling(max(npso))))
+    grid(NA,NULL)
+    polygon(c(date,rev(date)),c(c(rep(0,t)),rev(npso[j,i,])),col="blue4", border="blue4")
+    box()
+  }
+}
+### NET PAIRWISE DIRECTIONAL CONNECTEDNESS for riskshock
+i=3
+par(mfcol=c(6,2), 
+    oma=c(0.5,0.5,0,0), mar=c(1.5,1,1.5,1), mgp=c(0.5,0.5,0))
+for (j in 4:k) {
+  if (i!=j) {
+    # Remove NA rows
+    valid_idx <- which(!is.na(date) & !is.na(total))
+    date <- date[valid_idx]
+    total <- total[valid_idx]
+    
+    plot(date,npso[j,i,], xlab="",ylab="",type="l",xaxs="i",col="blue4", las=1, main=paste0(NAMES[i],"-",NAMES[j]),tck=-0.02,yaxs="i",ylim=c(floor(min(npso)),ceiling(max(npso))))
+    grid(NA,NULL)
+    polygon(c(date,rev(date)),c(c(rep(0,t)),rev(npso[j,i,])),col="blue4", border="blue4")
+    box()
+  }
+}
+
